@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Notas"/>
+<meta name="theme-color" content="#0a0a0f"/>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icon.png"/>
+<title>Notas</title>
+<style>
+:root{--bg:#0a0a0f;--card:#13131a;--ac:#7c6aff;--tx:#f0eff8;--mu:#6b6a7d;--bd:rgba(255,255,255,.08)}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;min-height:100dvh;padding-bottom:40px}
+header{padding:calc(env(safe-area-inset-top,20px) + 16px) 20px 0;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:26px;font-weight:800;background:linear-gradient(135deg,#f0eff8,#7c6aff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+header span{font-size:13px;color:var(--mu)}
+.input-box{margin:20px;display:flex;gap:10px}
+textarea{flex:1;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;color:var(--tx);font-size:15px;font-family:system-ui,sans-serif;resize:none;height:52px;outline:none;transition:border-color .2s}
+textarea:focus{border-color:var(--ac)}
+button.add{width:52px;height:52px;border-radius:14px;background:var(--ac);border:none;color:#fff;font-size:24px;cursor:pointer;flex-shrink:0}
+.list{display:flex;flex-direction:column;gap:10px;padding:0 20px}
+.note{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:14px 16px;display:flex;align-items:flex-start;gap:12px;animation:in .25s ease}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.note p{flex:1;font-size:15px;line-height:1.5;word-break:break-word}
+.note time{font-size:11px;color:var(--mu);white-space:nowrap;margin-top:2px}
+.del{background:transparent;border:none;color:var(--mu);font-size:18px;cursor:pointer;padding:2px 6px}
+.empty{text-align:center;padding:60px 20px;color:var(--mu);font-size:15px}
+</style>
+</head>
+<body>
+<header>
+  <h1>✦ Notas</h1>
+  <span id="count">0 notas</span>
+</header>
+<div class="input-box">
+  <textarea id="inp" placeholder="Escreve uma nota..."></textarea>
+  <button class="add" onclick="add()">+</button>
+</div>
+<div class="list" id="list"></div>
+<script>
+var notes=JSON.parse(localStorage.getItem('notes')||'[]');
+function save(){localStorage.setItem('notes',JSON.stringify(notes))}
+function add(){
+  var v=document.getElementById('inp').value.trim();
+  if(!v)return;
+  notes.unshift({id:Date.now(),text:v,time:new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})});
+  save();document.getElementById('inp').value='';render();
+}
+function del(id){notes=notes.filter(n=>n.id!==id);save();render()}
+function render(){
+  var l=document.getElementById('list');
+  document.getElementById('count').textContent=notes.length+' nota'+(notes.length!==1?'s':'');
+  if(!notes.length){l.innerHTML='<div class="empty">Sem notas ainda.<br>Adiciona uma acima!</div>';return}
+  l.innerHTML=notes.map(n=>'<div class="note"><p>'+n.text.replace(/</g,'&lt;')+'</p><time>'+n.time+'</time><button class="del" onclick="del('+n.id+')">✕</button></div>').join('');
+}
+document.getElementById('inp').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();add()}});
+render();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
