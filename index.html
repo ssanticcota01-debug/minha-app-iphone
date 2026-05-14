@@ -743,16 +743,124 @@ var tag = document.createElement('script');
 tag.src = 'https://www.youtube.com/iframe_api';
 document.head.appendChild(tag);
 
+// ── Ad Blocker ─────────────────────────────────────────────────────────────
+var adCheckInterval = null;
+var expectedVideoId = null;
+var adSkipAttempts = 0;
+
+function startAdWatcher() {
+  stopAdWatcher();
+  adSkipAttempts = 0;
+  adCheckInterval = setInterval(function() {
+    if (!ytReady || !ytPlayer) return;
+    try {
+      // Check if an ad is playing by looking at the current video URL
+      var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
+      if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
+        // A different video is playing — this is an ad!
+        handleAdDetected();
+        return;
+      }
+
+      // Try to click the skip button if it exists inside the iframe
+      var iframe = document.querySelector('#yt-player iframe') || document.getElementById('yt-player');
+      if (iframe && iframe.contentDocument) {
+        var skipBtn = iframe.contentDocument.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, [class*="skip"]');
+        if (skipBtn) { skipBtn.click(); return; }
+        // Mute ad audio as fallback
+        var adBadge = iframe.contentDocument.querySelector('.ytp-ad-badge, .ytp-ad-text');
+        if (adBadge) { ytPlayer.mute && ytPlayer.mute(); }
+        else { ytPlayer.unMute && ytPlayer.unMute(); }
+      }
+
+      // Fallback: detect ads via player state + duration anomaly
+      var dur = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+      var cur = ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() : 0;
+      // Ads are typically under 30s and play at the start
+      if (dur > 0 && dur < 35 && cur < dur && adSkipAttempts < 8) {
+        adSkipAttempts++;
+        // If this is suspiciously short for a music video, mute and wait for it to finish
+        ytPlayer.mute && ytPlayer.mute();
+        // Force seek to end to skip short ad
+        if (adSkipAttempts >= 3) {
+          ytPlayer.seekTo(dur - 0.1);
+        }
+      } else if (dur >= 35) {
+        // Looks like a real video, unmute
+        adSkipAttempts = 0;
+        ytPlayer.unMute && ytPlayer.unMute();
+      }
+    } catch(err) { /* cross-origin restrictions, skip silently */ }
+  }, 700);
+}
+
+function stopAdWatcher() {
+  if (adCheckInterval) clearInterval(adCheckInterval);
+  adCheckInterval = null;
+}
+
+function handleAdDetected() {
+  // Mute while ad plays and keep checking until the real video loads
+  ytPlayer.mute && ytPlayer.mute();
+  showToast('⏭ A saltar anúncio...');
+}
+
 function onYouTubeIframeAPIReady() {
   ytPlayer = new YT.Player('yt-player', {
     height: '1', width: '1',
-    playerVars: { autoplay: 0, controls: 0, playsinline: 1, rel: 0 },
+    playerVars: {
+      autoplay: 0,
+      controls: 0,
+      playsinline: 1,
+      rel: 0,
+      disablekb: 1,
+      iv_load_policy: 3,  // disable annotations
+      modestbranding: 1,
+      // Use no-cookie domain to reduce tracking & some ad types
+      origin: window.location.origin
+    },
+    host: 'https://www.youtube-nocookie.com',
     events: {
-      onReady: function() { ytReady = true; },
+      onReady: function() {
+        ytReady = true;
+      },
       onStateChange: function(e) {
-        if (e.data === YT.PlayerState.PLAYING) { setPlayingUI(true); startProgress(); }
+        if (e.data === YT.PlayerState.PLAYING) {
+          // Check if the playing video matches expected
+          var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
+          if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
+            // Ad is playing — mute it
+            ytPlayer.mute && ytPlayer.mute();
+            showToast('⏭ A saltar anúncio...');
+          } else {
+            // Real video — unmute and update UI
+            ytPlayer.unMute && ytPlayer.unMute();
+            setPlayingUI(true);
+            startProgress();
+          }
+        }
         if (e.data === YT.PlayerState.PAUSED) { setPlayingUI(false); stopProgress(); }
-        if (e.data === YT.PlayerState.ENDED) { onSongEnd(); }
+        if (e.data === YT.PlayerState.ENDED) {
+          // If ended but it's not our video, it was an ad — autoplay our song
+          var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
+          if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
+            // Ad ended, the real video should load now; do nothing (YT will auto-load it)
+          } else {
+            onSongEnd();
+          }
+        }
+        if (e.data === YT.PlayerState.BUFFERING) {
+          // Check for ad on buffering too
+          var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
+          if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
+            ytPlayer.mute && ytPlayer.mute();
+          }
+        }
+      },
+      onError: function(e) {
+        // Video unavailable/blocked, skip to next
+        showToast('Vídeo indisponível, a saltar...');
+        setTimeout(nextSong, 1500);
       }
     }
   });
@@ -763,10 +871,12 @@ function playSong(idx) {
   if (idx < 0 || idx >= songs.length) return;
   currentIdx = idx;
   var s = songs[idx];
+  expectedVideoId = s.ytId;
   updatePlayerUI(s);
   if (ytReady) {
     ytPlayer.loadVideoById(s.ytId);
     ytPlayer.playVideo();
+    startAdWatcher();
   }
   document.getElementById('mini-player').classList.add('visible');
   setAmbient(s.cover);
