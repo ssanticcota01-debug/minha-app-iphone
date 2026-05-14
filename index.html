@@ -5,60 +5,1041 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="Notas"/>
-<meta name="theme-color" content="#0a0a0f"/>
+<meta name="apple-mobile-web-app-title" content="Vora"/>
+<meta name="theme-color" content="#080810"/>
 <link rel="manifest" href="manifest.json"/>
 <link rel="apple-touch-icon" href="icon.png"/>
-<title>Notas</title>
+<title>Vora</title>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;900&display=swap" rel="stylesheet"/>
 <style>
-:root{--bg:#0a0a0f;--card:#13131a;--ac:#7c6aff;--tx:#f0eff8;--mu:#6b6a7d;--bd:rgba(255,255,255,.08)}
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;min-height:100dvh;padding-bottom:40px}
-header{padding:calc(env(safe-area-inset-top,20px) + 16px) 20px 0;display:flex;align-items:center;justify-content:space-between}
-header h1{font-size:26px;font-weight:800;background:linear-gradient(135deg,#f0eff8,#7c6aff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-header span{font-size:13px;color:var(--mu)}
-.input-box{margin:20px;display:flex;gap:10px}
-textarea{flex:1;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;color:var(--tx);font-size:15px;font-family:system-ui,sans-serif;resize:none;height:52px;outline:none;transition:border-color .2s}
-textarea:focus{border-color:var(--ac)}
-button.add{width:52px;height:52px;border-radius:14px;background:var(--ac);border:none;color:#fff;font-size:24px;cursor:pointer;flex-shrink:0}
-.list{display:flex;flex-direction:column;gap:10px;padding:0 20px}
-.note{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:14px 16px;display:flex;align-items:flex-start;gap:12px;animation:in .25s ease}
-@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.note p{flex:1;font-size:15px;line-height:1.5;word-break:break-word}
-.note time{font-size:11px;color:var(--mu);white-space:nowrap;margin-top:2px}
-.del{background:transparent;border:none;color:var(--mu);font-size:18px;cursor:pointer;padding:2px 6px}
-.empty{text-align:center;padding:60px 20px;color:var(--mu);font-size:15px}
+:root {
+  --bg: #080810;
+  --bg2: #0f0f1a;
+  --card: #13131f;
+  --card2: #1a1a2a;
+  --border: rgba(255,255,255,0.07);
+  --tx: #f2f0ff;
+  --tx2: #8a87a8;
+  --ac: #c084fc;
+  --ac2: #818cf8;
+  --ac3: #38bdf8;
+  --red: #f87171;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body { height:100%; overflow:hidden; }
+body {
+  background: var(--bg);
+  color: var(--tx);
+  font-family: 'Figtree', sans-serif;
+  overscroll-behavior: none;
+}
+
+/* ── Layout ── */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 430px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* ── Ambient bg ── */
+.ambient {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  transition: background 1.5s ease;
+}
+
+/* ── Pages ── */
+.pages {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+.page {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 120px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s;
+}
+.page.active { opacity: 1; pointer-events: all; }
+
+/* ── Header ── */
+.page-header {
+  padding: calc(var(--safe-top) + 18px) 20px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.page-title {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.5px;
+}
+.page-title span { color: var(--ac); }
+
+/* ── Search ── */
+.search-wrap { padding: 0 20px 16px; }
+.search-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+}
+.search-box input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--tx);
+  font-family: 'Figtree', sans-serif;
+  font-size: 15px;
+}
+.search-box input::placeholder { color: var(--tx2); }
+.search-icon { color: var(--tx2); font-size: 16px; }
+
+/* ── Section title ── */
+.sec { padding: 0 20px 12px; }
+.sec h2 { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+.sec p { font-size: 13px; color: var(--tx2); margin-top: 2px; }
+
+/* ── Horizontal scroll row ── */
+.h-scroll {
+  display: flex;
+  gap: 12px;
+  padding: 0 20px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.h-scroll::-webkit-scrollbar { display: none; }
+
+/* ── Album card ── */
+.album-card {
+  flex-shrink: 0;
+  width: 140px;
+  cursor: pointer;
+  transition: transform .2s;
+}
+.album-card:active { transform: scale(.95); }
+.album-thumb {
+  width: 140px;
+  height: 140px;
+  border-radius: 14px;
+  object-fit: cover;
+  background: var(--card2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  margin-bottom: 8px;
+  position: relative;
+  overflow: hidden;
+}
+.album-thumb img { width:100%; height:100%; object-fit:cover; border-radius:14px; }
+.album-thumb .play-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .2s;
+  border-radius: 14px;
+}
+.album-card:active .play-overlay { opacity: 1; }
+.album-card h3 { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.album-card p { font-size: 12px; color: var(--tx2); margin-top: 1px; }
+
+/* ── Song row ── */
+.song-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: background .15s;
+  border-radius: 14px;
+  margin: 0 8px;
+}
+.song-row:active { background: var(--card); }
+.song-row.playing { background: var(--card); }
+.song-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: var(--card2);
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+.song-thumb img { width:100%; height:100%; object-fit:cover; }
+.song-info { flex: 1; min-width: 0; }
+.song-info h3 { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.song-info p { font-size: 13px; color: var(--tx2); margin-top: 1px; }
+.song-row.playing .song-info h3 { color: var(--ac); }
+.song-actions { display: flex; align-items: center; gap: 8px; }
+.song-duration { font-size: 13px; color: var(--tx2); }
+.icon-btn {
+  width: 32px; height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--tx2);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: color .2s, background .2s;
+}
+.icon-btn:active { background: var(--card2); color: var(--tx); }
+.icon-btn.liked { color: var(--red); }
+
+/* ── Playing indicator ── */
+.playing-bars {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 16px;
+}
+.playing-bars span {
+  width: 3px;
+  background: var(--ac);
+  border-radius: 2px;
+  animation: bar 1s ease-in-out infinite alternate;
+}
+.playing-bars span:nth-child(2) { animation-delay: .2s; }
+.playing-bars span:nth-child(3) { animation-delay: .4s; }
+@keyframes bar {
+  from { height: 4px; }
+  to { height: 16px; }
+}
+
+/* ── Add song form ── */
+.add-form {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 16px;
+  margin: 0 20px 16px;
+}
+.add-form h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+.field { margin-bottom: 10px; }
+.field label { font-size: 12px; color: var(--tx2); margin-bottom: 4px; display: block; }
+.field input {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--tx);
+  font-family: 'Figtree', sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .2s;
+}
+.field input:focus { border-color: var(--ac); }
+.field input::placeholder { color: var(--tx2); }
+.btn-add {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, var(--ac), var(--ac2));
+  border: none;
+  border-radius: 12px;
+  color: white;
+  font-family: 'Figtree', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: opacity .2s;
+}
+.btn-add:active { opacity: .8; }
+
+/* ── Mini Player ── */
+.mini-player {
+  position: fixed;
+  bottom: calc(var(--safe-bottom) + 65px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 24px);
+  max-width: 406px;
+  background: rgba(20,18,35,0.92);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 18px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 50;
+  cursor: pointer;
+  transition: transform .3s, opacity .3s;
+  transform: translateX(-50%) translateY(120px);
+  opacity: 0;
+}
+.mini-player.visible {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+.mini-thumb {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  background: var(--card2);
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.mini-thumb img { width:100%; height:100%; object-fit:cover; }
+.mini-info { flex: 1; min-width: 0; }
+.mini-info h4 { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-info p { font-size: 12px; color: var(--tx2); }
+.mini-controls { display: flex; gap: 6px; align-items: center; }
+.mini-btn {
+  width: 34px; height: 34px;
+  background: transparent;
+  border: none;
+  color: var(--tx);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background .2s;
+}
+.mini-btn:active { background: var(--card2); }
+.mini-progress {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--border);
+  border-radius: 0 0 18px 18px;
+  overflow: hidden;
+}
+.mini-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--ac), var(--ac2));
+  width: 0%;
+  transition: width .5s linear;
+}
+
+/* ── Full Player ── */
+.full-player {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--safe-top) + 20px) 28px calc(var(--safe-bottom) + 20px);
+  transform: translateY(100%);
+  transition: transform .4s cubic-bezier(.32,0,.67,0);
+}
+.full-player.open {
+  transform: translateY(0);
+  transition: transform .4s cubic-bezier(.33,1,.68,1);
+}
+.fp-handle {
+  width: 36px; height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 0 auto 24px;
+  cursor: pointer;
+}
+.fp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+.fp-header h3 { font-size: 14px; font-weight: 600; color: var(--tx2); letter-spacing: .5px; text-transform: uppercase; }
+.fp-art {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 20px;
+  background: var(--card2);
+  margin-bottom: 32px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 80px;
+  position: relative;
+  box-shadow: 0 32px 80px rgba(0,0,0,.6);
+}
+.fp-art img { width:100%; height:100%; object-fit:cover; }
+.fp-art.playing { animation: pulse-art 3s ease-in-out infinite; }
+@keyframes pulse-art {
+  0%,100% { box-shadow: 0 32px 80px rgba(0,0,0,.6), 0 0 0 0 rgba(192,132,252,0); }
+  50% { box-shadow: 0 32px 80px rgba(0,0,0,.6), 0 0 40px 8px rgba(192,132,252,.15); }
+}
+.fp-meta { margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; }
+.fp-meta-left h2 { font-size: 22px; font-weight: 700; letter-spacing: -.3px; }
+.fp-meta-left p { font-size: 15px; color: var(--tx2); margin-top: 3px; }
+.fp-like { font-size: 26px; background: none; border: none; cursor: pointer; transition: transform .2s; }
+.fp-like:active { transform: scale(1.3); }
+.fp-progress { margin-bottom: 12px; }
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--card2);
+  border-radius: 2px;
+  position: relative;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--ac), var(--ac2));
+  border-radius: 2px;
+  width: 0%;
+  transition: width .5s linear;
+  position: relative;
+}
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  top: -4px;
+  width: 12px; height: 12px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
+.fp-times { display: flex; justify-content: space-between; font-size: 12px; color: var(--tx2); }
+.fp-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+.ctrl-btn {
+  background: none;
+  border: none;
+  color: var(--tx);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .15s, opacity .2s;
+}
+.ctrl-btn:active { transform: scale(.9); opacity: .7; }
+.ctrl-btn.sm { font-size: 22px; color: var(--tx2); }
+.ctrl-btn.lg {
+  width: 68px; height: 68px;
+  background: white;
+  border-radius: 50%;
+  font-size: 28px;
+  color: #080810;
+  box-shadow: 0 8px 32px rgba(0,0,0,.4);
+}
+.fp-extra { display: flex; justify-content: space-around; }
+.fp-extra button {
+  background: none;
+  border: none;
+  color: var(--tx2);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-family: 'Figtree', sans-serif;
+  font-size: 11px;
+  transition: color .2s;
+}
+.fp-extra button span:first-child { font-size: 22px; }
+.fp-extra button:active { color: var(--ac); }
+.fp-extra button.active { color: var(--ac); }
+
+/* ── Nav ── */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 430px;
+  padding: 8px 0 calc(var(--safe-bottom) + 8px);
+  background: rgba(8,8,16,0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-around;
+  z-index: 40;
+}
+.nav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 6px 20px;
+  border-radius: 12px;
+  transition: all .2s;
+  color: var(--tx2);
+}
+.nav-btn.active { color: var(--ac); }
+.nav-btn span:first-child { font-size: 22px; }
+.nav-btn span:last-child { font-size: 10px; font-family: 'Figtree', sans-serif; font-weight: 500; }
+
+/* ── YouTube hidden ── */
+#yt-container {
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ── Toast ── */
+.toast {
+  position: fixed;
+  top: calc(var(--safe-top) + 16px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-80px);
+  background: var(--card2);
+  border: 1px solid var(--border);
+  color: var(--tx);
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 200;
+  white-space: nowrap;
+  transition: transform .3s cubic-bezier(.34,1.56,.64,1);
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── Empty ── */
+.empty-state {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--tx2);
+}
+.empty-state .e-icon { font-size: 56px; margin-bottom: 12px; opacity: .4; }
+.empty-state p { font-size: 15px; }
+
+/* ── Download btn ── */
+.dl-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 12px;
+  color: var(--tx2);
+  font-size: 12px;
+  font-family: 'Figtree', sans-serif;
+  cursor: pointer;
+  transition: all .2s;
+  text-decoration: none;
+}
+.dl-btn:active { color: var(--ac); border-color: var(--ac); }
+.dl-btn span { font-size: 14px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>✦ Notas</h1>
-  <span id="count">0 notas</span>
-</header>
-<div class="input-box">
-  <textarea id="inp" placeholder="Escreve uma nota..."></textarea>
-  <button class="add" onclick="add()">+</button>
+
+<div class="ambient" id="ambient"></div>
+
+<!-- ── PAGES ── -->
+<div class="app">
+<div class="pages">
+
+  <!-- HOME -->
+  <div class="page active" id="page-home">
+    <div class="page-header">
+      <div class="page-title">Vora <span>♪</span></div>
+      <button class="icon-btn" style="font-size:20px" onclick="showPage('page-search')">🔍</button>
+    </div>
+
+    <div class="sec"><h2>Em Alta</h2><p>As mais tocadas agora</p></div>
+    <div class="h-scroll" id="featured-row"></div>
+
+    <div class="sec" style="margin-top:24px"><h2>A tua biblioteca</h2><p id="lib-count">0 músicas</p></div>
+    <div id="home-songs"></div>
+  </div>
+
+  <!-- SEARCH / ADD -->
+  <div class="page" id="page-search">
+    <div class="page-header">
+      <div class="page-title" style="font-size:22px">Adicionar</div>
+    </div>
+    <div class="add-form">
+      <h3>➕ Nova música</h3>
+      <div class="field">
+        <label>Nome da música</label>
+        <input id="inp-name" placeholder="Ex: Blinding Lights" autocomplete="off"/>
+      </div>
+      <div class="field">
+        <label>Artista</label>
+        <input id="inp-artist" placeholder="Ex: The Weeknd" autocomplete="off"/>
+      </div>
+      <div class="field">
+        <label>ID do YouTube (da URL do vídeo)</label>
+        <input id="inp-yt" placeholder="Ex: 4NRXx6U8ABQ" autocomplete="off"/>
+      </div>
+      <div class="field">
+        <label>URL da capa (opcional)</label>
+        <input id="inp-cover" placeholder="https://..." autocomplete="off"/>
+      </div>
+      <button class="btn-add" onclick="addSong()">Adicionar à biblioteca</button>
+    </div>
+    <div class="sec"><h2>Como adicionar</h2></div>
+    <div style="padding:0 20px;color:var(--tx2);font-size:14px;line-height:1.7">
+      <p>1. Vai ao YouTube e abre a música</p>
+      <p>2. Copia a parte depois de <b style="color:var(--tx)">?v=</b> no link</p>
+      <p style="font-size:12px;color:var(--ac);margin:4px 0 8px">youtube.com/watch?v=<b>4NRXx6U8ABQ</b></p>
+      <p>3. Cola no campo "ID do YouTube" acima</p>
+      <p style="margin-top:8px">Para a capa, podes usar qualquer link de imagem.</p>
+    </div>
+  </div>
+
+  <!-- LIBRARY -->
+  <div class="page" id="page-library">
+    <div class="page-header">
+      <div class="page-title">Biblioteca</div>
+      <button class="icon-btn" style="color:var(--red);font-size:13px;width:auto;padding:6px 10px" onclick="clearLibrary()">Limpar</button>
+    </div>
+    <div id="library-songs"></div>
+  </div>
+
+</div><!-- /pages -->
+
+<!-- ── Mini Player ── -->
+<div class="mini-player" id="mini-player" onclick="openFullPlayer()">
+  <div class="mini-thumb" id="mini-thumb">🎵</div>
+  <div class="mini-info">
+    <h4 id="mini-title">Nenhuma música</h4>
+    <p id="mini-artist">—</p>
+  </div>
+  <div class="mini-controls" onclick="event.stopPropagation()">
+    <button class="mini-btn" onclick="prevSong()">⏮</button>
+    <button class="mini-btn" id="mini-play-btn" onclick="togglePlay()">▶️</button>
+    <button class="mini-btn" onclick="nextSong()">⏭</button>
+  </div>
+  <div class="mini-progress"><div class="mini-progress-bar" id="mini-prog"></div></div>
 </div>
-<div class="list" id="list"></div>
+
+<!-- ── Full Player ── -->
+<div class="full-player" id="full-player">
+  <div class="fp-handle" onclick="closeFullPlayer()"></div>
+  <div class="fp-header">
+    <button class="icon-btn" onclick="closeFullPlayer()">⌄</button>
+    <h3>A tocar agora</h3>
+    <button class="icon-btn" id="fp-more-btn" onclick="showDownload()">⋯</button>
+  </div>
+  <div class="fp-art" id="fp-art">🎵</div>
+  <div class="fp-meta">
+    <div class="fp-meta-left">
+      <h2 id="fp-title">—</h2>
+      <p id="fp-artist">—</p>
+    </div>
+    <button class="fp-like" id="fp-like-btn" onclick="toggleLike()">🤍</button>
+  </div>
+  <div class="fp-progress">
+    <div class="progress-bar" id="progress-bar" onclick="seekTo(event)">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <div class="fp-times">
+      <span id="time-cur">0:00</span>
+      <span id="time-dur">0:00</span>
+    </div>
+  </div>
+  <div class="fp-controls">
+    <button class="ctrl-btn sm" id="shuffle-btn" onclick="toggleShuffle()">🔀</button>
+    <button class="ctrl-btn" style="font-size:32px" onclick="prevSong()">⏮</button>
+    <button class="ctrl-btn lg" id="fp-play-btn" onclick="togglePlay()">▶</button>
+    <button class="ctrl-btn" style="font-size:32px" onclick="nextSong()">⏭</button>
+    <button class="ctrl-btn sm" id="repeat-btn" onclick="toggleRepeat()">🔁</button>
+  </div>
+  <div class="fp-extra">
+    <button id="dl-btn-fp" onclick="showDownload()"><span>⬇️</span>Download</button>
+    <button onclick="showToast('Em breve!')"><span>📤</span>Partilhar</button>
+    <button onclick="showToast('Em breve!')"><span>📋</span>Fila</button>
+  </div>
+</div>
+
+<!-- ── Bottom Nav ── -->
+<nav class="bottom-nav">
+  <button class="nav-btn active" id="nav-home" onclick="showPage('page-home')">
+    <span>🏠</span><span>Início</span>
+  </button>
+  <button class="nav-btn" id="nav-search" onclick="showPage('page-search')">
+    <span>➕</span><span>Adicionar</span>
+  </button>
+  <button class="nav-btn" id="nav-library" onclick="showPage('page-library')">
+    <span>🎵</span><span>Biblioteca</span>
+  </button>
+</nav>
+
+</div><!-- /app -->
+
+<!-- ── YouTube hidden container ── -->
+<div id="yt-container"><div id="yt-player"></div></div>
+
+<!-- ── Toast ── -->
+<div class="toast" id="toast"></div>
+
 <script>
-var notes=JSON.parse(localStorage.getItem('notes')||'[]');
-function save(){localStorage.setItem('notes',JSON.stringify(notes))}
-function add(){
-  var v=document.getElementById('inp').value.trim();
-  if(!v)return;
-  notes.unshift({id:Date.now(),text:v,time:new Date().toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})});
-  save();document.getElementById('inp').value='';render();
+// ── State ──────────────────────────────────────────────────────────────────
+var songs = JSON.parse(localStorage.getItem('vora_songs') || '[]');
+var liked = JSON.parse(localStorage.getItem('vora_liked') || '[]');
+var currentIdx = -1;
+var isPlaying = false;
+var isShuffle = false;
+var isRepeat = false;
+var ytPlayer = null;
+var ytReady = false;
+var progressInterval = null;
+
+// Default songs
+var defaultSongs = [
+  { id: 's1', name: 'Blinding Lights', artist: 'The Weeknd', ytId: '4NRXx6U8ABQ', cover: 'https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg' },
+  { id: 's2', name: 'Levitating', artist: 'Dua Lipa', ytId: 'TUVcZfQe-Kw', cover: 'https://i.ytimg.com/vi/TUVcZfQe-Kw/hqdefault.jpg' },
+  { id: 's3', name: 'Stay', artist: 'The Kid LAROI & Justin Bieber', ytId: 'kTJczUoc26U', cover: 'https://i.ytimg.com/vi/kTJczUoc26U/hqdefault.jpg' },
+  { id: 's4', name: 'Heat Waves', artist: 'Glass Animals', ytId: 'mRD0-GxqHVo', cover: 'https://i.ytimg.com/vi/mRD0-GxqHVo/hqdefault.jpg' },
+  { id: 's5', name: 'As It Was', artist: 'Harry Styles', ytId: 'H5v3kku4y6Q', cover: 'https://i.ytimg.com/vi/H5v3kku4y6Q/hqdefault.jpg' },
+];
+if (!songs.length) { songs = defaultSongs; saveSongs(); }
+
+function saveSongs() { localStorage.setItem('vora_songs', JSON.stringify(songs)); }
+function saveLiked() { localStorage.setItem('vora_liked', JSON.stringify(liked)); }
+function isLiked(id) { return liked.includes(id); }
+
+// ── YouTube IFrame API ─────────────────────────────────────────────────────
+var tag = document.createElement('script');
+tag.src = 'https://www.youtube.com/iframe_api';
+document.head.appendChild(tag);
+
+function onYouTubeIframeAPIReady() {
+  ytPlayer = new YT.Player('yt-player', {
+    height: '1', width: '1',
+    playerVars: { autoplay: 0, controls: 0, playsinline: 1, rel: 0 },
+    events: {
+      onReady: function() { ytReady = true; },
+      onStateChange: function(e) {
+        if (e.data === YT.PlayerState.PLAYING) { setPlayingUI(true); startProgress(); }
+        if (e.data === YT.PlayerState.PAUSED) { setPlayingUI(false); stopProgress(); }
+        if (e.data === YT.PlayerState.ENDED) { onSongEnd(); }
+      }
+    }
+  });
 }
-function del(id){notes=notes.filter(n=>n.id!==id);save();render()}
-function render(){
-  var l=document.getElementById('list');
-  document.getElementById('count').textContent=notes.length+' nota'+(notes.length!==1?'s':'');
-  if(!notes.length){l.innerHTML='<div class="empty">Sem notas ainda.<br>Adiciona uma acima!</div>';return}
-  l.innerHTML=notes.map(n=>'<div class="note"><p>'+n.text.replace(/</g,'&lt;')+'</p><time>'+n.time+'</time><button class="del" onclick="del('+n.id+')">✕</button></div>').join('');
+
+// ── Playback ───────────────────────────────────────────────────────────────
+function playSong(idx) {
+  if (idx < 0 || idx >= songs.length) return;
+  currentIdx = idx;
+  var s = songs[idx];
+  updatePlayerUI(s);
+  if (ytReady) {
+    ytPlayer.loadVideoById(s.ytId);
+    ytPlayer.playVideo();
+  }
+  document.getElementById('mini-player').classList.add('visible');
+  setAmbient(s.cover);
+  renderAll();
 }
-document.getElementById('inp').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();add()}});
-render();
-if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+
+function togglePlay() {
+  if (currentIdx < 0 && songs.length) { playSong(0); return; }
+  if (!ytReady) return;
+  if (isPlaying) ytPlayer.pauseVideo();
+  else ytPlayer.playVideo();
+}
+
+function nextSong() {
+  if (!songs.length) return;
+  var next;
+  if (isShuffle) next = Math.floor(Math.random() * songs.length);
+  else next = (currentIdx + 1) % songs.length;
+  playSong(next);
+}
+
+function prevSong() {
+  if (!songs.length) return;
+  if (ytReady && ytPlayer.getCurrentTime && ytPlayer.getCurrentTime() > 3) {
+    ytPlayer.seekTo(0); return;
+  }
+  var prev = (currentIdx - 1 + songs.length) % songs.length;
+  playSong(prev);
+}
+
+function onSongEnd() {
+  if (isRepeat) { ytPlayer.seekTo(0); ytPlayer.playVideo(); }
+  else nextSong();
+}
+
+function seekTo(e) {
+  if (!ytReady || currentIdx < 0) return;
+  var bar = document.getElementById('progress-bar');
+  var rect = bar.getBoundingClientRect();
+  var ratio = (e.clientX - rect.left) / rect.width;
+  var dur = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+  if (dur) ytPlayer.seekTo(ratio * dur);
+}
+
+function setPlayingUI(playing) {
+  isPlaying = playing;
+  document.getElementById('mini-play-btn').textContent = playing ? '⏸️' : '▶️';
+  document.getElementById('fp-play-btn').textContent = playing ? '⏸' : '▶';
+  var art = document.getElementById('fp-art');
+  if (playing) art.classList.add('playing'); else art.classList.remove('playing');
+}
+
+function startProgress() {
+  stopProgress();
+  progressInterval = setInterval(updateProgress, 1000);
+}
+
+function stopProgress() {
+  if (progressInterval) clearInterval(progressInterval);
+}
+
+function updateProgress() {
+  if (!ytReady || !ytPlayer.getCurrentTime) return;
+  var cur = ytPlayer.getCurrentTime();
+  var dur = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+  if (!dur) return;
+  var pct = (cur / dur) * 100;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('mini-prog').style.width = pct + '%';
+  document.getElementById('time-cur').textContent = fmtTime(cur);
+  document.getElementById('time-dur').textContent = fmtTime(dur);
+}
+
+function fmtTime(s) {
+  s = Math.floor(s);
+  return Math.floor(s/60) + ':' + ('0' + (s%60)).slice(-2);
+}
+
+function updatePlayerUI(s) {
+  document.getElementById('mini-title').textContent = s.name;
+  document.getElementById('mini-artist').textContent = s.artist;
+  document.getElementById('fp-title').textContent = s.name;
+  document.getElementById('fp-artist').textContent = s.artist;
+  document.getElementById('fp-like-btn').textContent = isLiked(s.id) ? '❤️' : '🤍';
+
+  var cover = s.cover || '';
+  // mini thumb
+  var mt = document.getElementById('mini-thumb');
+  mt.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML=\'🎵\'"/>' : '🎵';
+  // fp art
+  var fa = document.getElementById('fp-art');
+  fa.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML=\'🎵\'"/>' : '🎵';
+}
+
+// ── Ambient ────────────────────────────────────────────────────────────────
+function setAmbient(cover) {
+  var colors = ['#4c1d95','#1e3a5f','#1a1a2e','#2d1b4e','#0f2027'];
+  var c = colors[Math.floor(Math.random() * colors.length)];
+  document.getElementById('ambient').style.background =
+    'radial-gradient(ellipse 70% 50% at 30% 20%, ' + c + '55 0%, transparent 70%),' +
+    'radial-gradient(ellipse 50% 40% at 80% 80%, rgba(129,140,248,0.08) 0%, transparent 60%)';
+}
+
+// ── Shuffle / Repeat ───────────────────────────────────────────────────────
+function toggleShuffle() {
+  isShuffle = !isShuffle;
+  document.getElementById('shuffle-btn').style.opacity = isShuffle ? '1' : '0.4';
+  showToast(isShuffle ? 'Shuffle ativado' : 'Shuffle desativado');
+}
+function toggleRepeat() {
+  isRepeat = !isRepeat;
+  document.getElementById('repeat-btn').style.opacity = isRepeat ? '1' : '0.4';
+  showToast(isRepeat ? 'Repetir ativado' : 'Repetir desativado');
+}
+
+// ── Like ───────────────────────────────────────────────────────────────────
+function toggleLike() {
+  if (currentIdx < 0) return;
+  var id = songs[currentIdx].id;
+  if (isLiked(id)) liked = liked.filter(function(x){ return x !== id; });
+  else liked.push(id);
+  saveLiked();
+  document.getElementById('fp-like-btn').textContent = isLiked(id) ? '❤️' : '🤍';
+  renderAll();
+}
+
+// ── Add / Remove ───────────────────────────────────────────────────────────
+function addSong() {
+  var name = document.getElementById('inp-name').value.trim();
+  var artist = document.getElementById('inp-artist').value.trim();
+  var ytId = document.getElementById('inp-yt').value.trim();
+  var cover = document.getElementById('inp-cover').value.trim();
+
+  if (!name || !artist || !ytId) { showToast('Preenche nome, artista e ID do YouTube'); return; }
+
+  // Auto cover from YouTube thumbnail if none provided
+  if (!cover) cover = 'https://i.ytimg.com/vi/' + ytId + '/hqdefault.jpg';
+
+  var s = { id: 's' + Date.now(), name: name, artist: artist, ytId: ytId, cover: cover };
+  songs.unshift(s);
+  saveSongs();
+  document.getElementById('inp-name').value = '';
+  document.getElementById('inp-artist').value = '';
+  document.getElementById('inp-yt').value = '';
+  document.getElementById('inp-cover').value = '';
+  showToast('\"' + name + '\" adicionada!');
+  renderAll();
+  showPage('page-home');
+}
+
+function removeSong(id) {
+  songs = songs.filter(function(s){ return s.id !== id; });
+  saveSongs();
+  if (currentIdx >= songs.length) currentIdx = songs.length - 1;
+  renderAll();
+  showToast('Música removida');
+}
+
+function clearLibrary() {
+  if (!confirm('Limpar toda a biblioteca?')) return;
+  songs = [];
+  saveSongs();
+  currentIdx = -1;
+  document.getElementById('mini-player').classList.remove('visible');
+  renderAll();
+}
+
+// ── Download ───────────────────────────────────────────────────────────────
+function showDownload() {
+  if (currentIdx < 0) return;
+  var s = songs[currentIdx];
+  var url = 'https://www.y2mate.com/youtube/' + s.ytId;
+  showToast('A abrir download de áudio...');
+  setTimeout(function(){ window.open(url, '_blank'); }, 500);
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function renderAll() {
+  renderFeatured();
+  renderHomeSongs();
+  renderLibrary();
+  document.getElementById('lib-count').textContent = songs.length + ' música' + (songs.length !== 1 ? 's' : '');
+}
+
+function renderFeatured() {
+  var row = document.getElementById('featured-row');
+  var top = songs.slice(0, 6);
+  if (!top.length) { row.innerHTML = ''; return; }
+  row.innerHTML = top.map(function(s, i) {
+    var cover = s.cover || '';
+    var thumbHtml = cover
+      ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML=\'🎵\'" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>'
+      : '🎵';
+    return '<div class="album-card" onclick="playSong(' + songs.indexOf(s) + ')">' +
+      '<div class="album-thumb">' + thumbHtml +
+      '<div class="play-overlay"><span style="font-size:32px">▶</span></div></div>' +
+      '<h3>' + esc(s.name) + '</h3><p>' + esc(s.artist) + '</p></div>';
+  }).join('');
+}
+
+function renderHomeSongs() {
+  var el = document.getElementById('home-songs');
+  if (!songs.length) {
+    el.innerHTML = '<div class="empty-state"><div class="e-icon">🎵</div><p>Ainda sem músicas.<br>Adiciona uma no ➕</p></div>';
+    return;
+  }
+  el.innerHTML = songs.map(function(s, i) { return songRowHTML(s, i); }).join('');
+}
+
+function renderLibrary() {
+  var el = document.getElementById('library-songs');
+  if (!songs.length) {
+    el.innerHTML = '<div class="empty-state"><div class="e-icon">🎵</div><p>Biblioteca vazia</p></div>';
+    return;
+  }
+  el.innerHTML = songs.map(function(s, i) { return songRowHTML(s, i, true); }).join('');
+}
+
+function songRowHTML(s, i, showDel) {
+  var cover = s.cover || '';
+  var thumbHtml = cover
+    ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML=\'🎵\'"/>'
+    : '🎵';
+  var isNowPlaying = (i === currentIdx);
+  var likeIcon = isLiked(s.id) ? '❤️' : '🤍';
+  var playingBars = isNowPlaying && isPlaying
+    ? '<div class="playing-bars"><span></span><span></span><span></span></div>'
+    : '';
+
+  return '<div class="song-row' + (isNowPlaying ? ' playing' : '') + '" onclick="playSong(' + i + ')">' +
+    '<div class="song-thumb">' + thumbHtml + '</div>' +
+    '<div class="song-info"><h3>' + esc(s.name) + '</h3><p>' + esc(s.artist) + '</p></div>' +
+    '<div class="song-actions">' + playingBars +
+    (showDel ? '<button class="icon-btn" onclick="event.stopPropagation();removeSong(\'' + s.id + '\')" style="color:var(--red)">✕</button>' : '') +
+    '</div></div>';
+}
+
+function esc(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(function(b){ b.classList.remove('active'); });
+  var map = { 'page-home': 'nav-home', 'page-search': 'nav-search', 'page-library': 'nav-library' };
+  if (map[id]) document.getElementById(map[id]).classList.add('active');
+}
+
+function openFullPlayer() {
+  document.getElementById('full-player').classList.add('open');
+}
+function closeFullPlayer() {
+  document.getElementById('full-player').classList.remove('open');
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+var toastTimer = null;
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2400);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+document.getElementById('shuffle-btn').style.opacity = '0.4';
+document.getElementById('repeat-btn').style.opacity = '0.4';
+renderAll();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
