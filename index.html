@@ -513,12 +513,14 @@ body {
 /* ── YouTube hidden ── */
 #yt-container {
   position: fixed;
-  top: -9999px;
-  left: -9999px;
+  bottom: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
   pointer-events: none;
+  opacity: 0.01; /* iOS needs >0 opacity to keep iframe alive in background */
+  z-index: -1;
 }
 
 /* ── Toast ── */
@@ -724,6 +726,112 @@ var ytPlayer = null;
 var ytReady = false;
 var progressInterval = null;
 
+// ── iOS Background Audio Keepalive ─────────────────────────────────────────
+// iOS Safari suspends audio unless there's an active Web Audio context.
+// We play a silent buffer on a loop to keep the audio session alive.
+var audioCtx = null;
+var silentSource = null;
+
+function initAudioContext() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    scheduleKeepAlive();
+  } catch(e) {}
+}
+
+function scheduleKeepAlive() {
+  if (!audioCtx) return;
+  // Create a 3-second silent buffer and schedule it to loop forever
+  // This tricks iOS into keeping the audio session active
+  var buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 3, audioCtx.sampleRate);
+  silentSource = audioCtx.createBufferSource();
+  silentSource.buffer = buf;
+  silentSource.loop = true;
+  silentSource.connect(audioCtx.destination);
+  silentSource.start(0);
+}
+
+function resumeAudioContext() {
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(function(){});
+  }
+}
+
+// iOS requires AudioContext to be started from a user gesture
+document.addEventListener('touchstart', function onFirstTouch() {
+  initAudioContext();
+  document.removeEventListener('touchstart', onFirstTouch);
+}, { once: true, passive: true });
+
+// ── Media Session API (Lock Screen Controls) ───────────────────────────────
+function updateMediaSession(s) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: s.name,
+    artist: s.artist,
+    album: 'Vora',
+    artwork: s.cover ? [
+      { src: s.cover, sizes: '512x512', type: 'image/jpeg' }
+    ] : []
+  });
+  navigator.mediaSession.setActionHandler('play', function() {
+    if (ytReady) ytPlayer.playVideo();
+  });
+  navigator.mediaSession.setActionHandler('pause', function() {
+    if (ytReady) ytPlayer.pauseVideo();
+  });
+  navigator.mediaSession.setActionHandler('previoustrack', prevSong);
+  navigator.mediaSession.setActionHandler('nexttrack', nextSong);
+  navigator.mediaSession.setActionHandler('seekto', function(d) {
+    if (ytReady && d.seekTime !== undefined) ytPlayer.seekTo(d.seekTime);
+  });
+}
+
+function setMediaSessionState(playing) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+}
+
+function updateMediaSessionPosition() {
+  if (!('mediaSession' in navigator) || !ytReady || !ytPlayer.getDuration) return;
+  try {
+    var dur = ytPlayer.getDuration();
+    var cur = ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() : 0;
+    if (dur > 0) {
+      navigator.mediaSession.setPositionState({
+        duration: dur,
+        playbackRate: 1,
+        position: Math.min(cur, dur)
+      });
+    }
+  } catch(e) {}
+}
+
+// ── Visibility / Background handling ──────────────────────────────────────
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) {
+    // Going to background — resume AudioContext to prevent iOS from killing it
+    resumeAudioContext();
+  } else {
+    // Coming back to foreground
+    resumeAudioContext();
+    // If we were playing but iOS paused us, resume
+    if (isPlaying && ytReady) {
+      setTimeout(function() {
+        try {
+          var state = ytPlayer.getPlayerState();
+          // PAUSED = 2, BUFFERING = 3, PLAYING = 1
+          if (state === 2) {
+            ytPlayer.playVideo();
+          }
+        } catch(e) {}
+      }, 300);
+    }
+  }
+});
+
 // Default songs
 var defaultSongs = [
   { id: 's1', name: 'Blinding Lights', artist: 'The Weeknd', ytId: '4NRXx6U8ABQ', cover: 'https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg' },
@@ -873,6 +981,8 @@ function playSong(idx) {
   var s = songs[idx];
   expectedVideoId = s.ytId;
   updatePlayerUI(s);
+  updateMediaSession(s);
+  resumeAudioContext();
   if (ytReady) {
     ytPlayer.loadVideoById(s.ytId);
     ytPlayer.playVideo();
@@ -927,6 +1037,7 @@ function setPlayingUI(playing) {
   document.getElementById('fp-play-btn').textContent = playing ? '⏸' : '▶';
   var art = document.getElementById('fp-art');
   if (playing) art.classList.add('playing'); else art.classList.remove('playing');
+  setMediaSessionState(playing);
 }
 
 function startProgress() {
@@ -948,6 +1059,7 @@ function updateProgress() {
   document.getElementById('mini-prog').style.width = pct + '%';
   document.getElementById('time-cur').textContent = fmtTime(cur);
   document.getElementById('time-dur').textContent = fmtTime(dur);
+  updateMediaSessionPosition();
 }
 
 function fmtTime(s) {
