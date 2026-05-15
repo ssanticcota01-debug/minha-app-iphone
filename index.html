@@ -721,7 +721,7 @@ function saveLiked() { localStorage.setItem('vora_liked', JSON.stringify(liked))
 function isLiked(id) { return liked.indexOf(id) !== -1; }
 
 // ── Version / localStorage reset ────────────────────────────────────────────
-var APP_VERSION = 'vora_v2';
+var APP_VERSION = 'vora_v3';
 if (localStorage.getItem('vora_version') !== APP_VERSION) {
   localStorage.removeItem('vora_songs');
   localStorage.removeItem('vora_liked');
