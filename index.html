@@ -1422,16 +1422,17 @@ var progressInterval = null;
 var audio = document.getElementById('audio-player');
 
 // ── Piped API ────────────────────────────────────────────────────────────────
+// CORS proxy wraps the API call so the browser accepts the response
+var CORS_PROXY = 'https://corsproxy.io/?url=';
 var PIPED_INSTANCES = [
+'https://pipedapi.kavin.rocks',
+'https://api.piped.projectsegfau.lt',
+'https://piped-api.garudalinux.org',
 'https://pipedapi.tokhmi.xyz',
 'https://piped-api.privacy.com.de',
 'https://pa.mint.lgbt',
-'https://piped.syncpundit.io/api',
-'https://pipedapi.kavin.rocks',
-'https://piped-api.garudalinux.org',
-'https://api.piped.projectsegfau.lt',
-'https://pipedapi.qdi.fi',
-'https://piapi.ggtyler.dev'
+'https://piapi.ggtyler.dev',
+'https://pipedapi.qdi.fi'
 ];
 var currentLoadToken = 0;
 
@@ -1445,7 +1446,8 @@ if (instIdx >= PIPED_INSTANCES.length) {
 callback(null, 'Não foi possível carregar. Tenta noutra música.');
 return;
 }
-fetch(PIPED_INSTANCES[instIdx] + '/streams/' + ytId)
+var apiUrl = PIPED_INSTANCES[instIdx] + '/streams/' + ytId;
+fetch(CORS_PROXY + encodeURIComponent(apiUrl))
 .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
 .then(function (data) {
 if (token !== currentLoadToken) return;
