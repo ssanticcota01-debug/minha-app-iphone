@@ -716,6 +716,14 @@ body {
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
+// Version bump forces a clean slate when switching from YT iframe to native audio
+var APP_VERSION = 'vora_v2';
+if (localStorage.getItem('vora_version') !== APP_VERSION) {
+  localStorage.removeItem('vora_songs');
+  localStorage.removeItem('vora_liked');
+  localStorage.setItem('vora_version', APP_VERSION);
+}
+
 var songs = JSON.parse(localStorage.getItem('vora_songs') || '[]');
 var liked = JSON.parse(localStorage.getItem('vora_liked') || '[]');
 var currentIdx = -1;
@@ -735,7 +743,13 @@ var defaultSongs = [
   { id: 's4', name: 'Heat Waves', artist: 'Glass Animals', ytId: 'mRD0-GxqHVo', cover: 'https://i.ytimg.com/vi/mRD0-GxqHVo/hqdefault.jpg' },
   { id: 's5', name: 'As It Was', artist: 'Harry Styles', ytId: 'H5v3kku4y6Q', cover: 'https://i.ytimg.com/vi/H5v3kku4y6Q/hqdefault.jpg' },
 ];
-if (!songs.length) { songs = defaultSongs; saveSongs(); }
+if (!songs.length) {
+  songs = defaultSongs;
+  saveSongs();
+  // Also clear any stale liked list from old version
+  localStorage.removeItem('vora_liked');
+  liked = [];
+}
 
 function saveSongs() { localStorage.setItem('vora_songs', JSON.stringify(songs)); }
 function saveLiked() { localStorage.setItem('vora_liked', JSON.stringify(liked)); }
