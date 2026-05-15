@@ -708,8 +708,8 @@ body {
 
 </div><!-- /app -->
 
-<!-- ── YouTube hidden container ── -->
-<div id="yt-container"><div id="yt-player"></div></div>
+<!-- ── Native Audio Player (iOS background compatible) ── -->
+<audio id="audio-player" playsinline preload="none" crossorigin="anonymous"></audio>
 
 <!-- ── Toast ── -->
 <div class="toast" id="toast"></div>
@@ -722,115 +722,10 @@ var currentIdx = -1;
 var isPlaying = false;
 var isShuffle = false;
 var isRepeat = false;
-var ytPlayer = null;
-var ytReady = false;
 var progressInterval = null;
 
-// ── iOS Background Audio Keepalive ─────────────────────────────────────────
-// iOS Safari suspends audio unless there's an active Web Audio context.
-// We play a silent buffer on a loop to keep the audio session alive.
-var audioCtx = null;
-var silentSource = null;
-
-function initAudioContext() {
-  if (audioCtx) return;
-  try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    scheduleKeepAlive();
-  } catch(e) {}
-}
-
-function scheduleKeepAlive() {
-  if (!audioCtx) return;
-  // Create a 3-second silent buffer and schedule it to loop forever
-  // This tricks iOS into keeping the audio session active
-  var buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 3, audioCtx.sampleRate);
-  silentSource = audioCtx.createBufferSource();
-  silentSource.buffer = buf;
-  silentSource.loop = true;
-  silentSource.connect(audioCtx.destination);
-  silentSource.start(0);
-}
-
-function resumeAudioContext() {
-  if (!audioCtx) return;
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume().catch(function(){});
-  }
-}
-
-// iOS requires AudioContext to be started from a user gesture
-document.addEventListener('touchstart', function onFirstTouch() {
-  initAudioContext();
-  document.removeEventListener('touchstart', onFirstTouch);
-}, { once: true, passive: true });
-
-// ── Media Session API (Lock Screen Controls) ───────────────────────────────
-function updateMediaSession(s) {
-  if (!('mediaSession' in navigator)) return;
-  navigator.mediaSession.metadata = new MediaMetadata({
-    title: s.name,
-    artist: s.artist,
-    album: 'Vora',
-    artwork: s.cover ? [
-      { src: s.cover, sizes: '512x512', type: 'image/jpeg' }
-    ] : []
-  });
-  navigator.mediaSession.setActionHandler('play', function() {
-    if (ytReady) ytPlayer.playVideo();
-  });
-  navigator.mediaSession.setActionHandler('pause', function() {
-    if (ytReady) ytPlayer.pauseVideo();
-  });
-  navigator.mediaSession.setActionHandler('previoustrack', prevSong);
-  navigator.mediaSession.setActionHandler('nexttrack', nextSong);
-  navigator.mediaSession.setActionHandler('seekto', function(d) {
-    if (ytReady && d.seekTime !== undefined) ytPlayer.seekTo(d.seekTime);
-  });
-}
-
-function setMediaSessionState(playing) {
-  if (!('mediaSession' in navigator)) return;
-  navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
-}
-
-function updateMediaSessionPosition() {
-  if (!('mediaSession' in navigator) || !ytReady || !ytPlayer.getDuration) return;
-  try {
-    var dur = ytPlayer.getDuration();
-    var cur = ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() : 0;
-    if (dur > 0) {
-      navigator.mediaSession.setPositionState({
-        duration: dur,
-        playbackRate: 1,
-        position: Math.min(cur, dur)
-      });
-    }
-  } catch(e) {}
-}
-
-// ── Visibility / Background handling ──────────────────────────────────────
-document.addEventListener('visibilitychange', function() {
-  if (document.hidden) {
-    // Going to background — resume AudioContext to prevent iOS from killing it
-    resumeAudioContext();
-  } else {
-    // Coming back to foreground
-    resumeAudioContext();
-    // If we were playing but iOS paused us, resume
-    if (isPlaying && ytReady) {
-      setTimeout(function() {
-        try {
-          var state = ytPlayer.getPlayerState();
-          // PAUSED = 2, BUFFERING = 3, PLAYING = 1
-          if (state === 2) {
-            ytPlayer.playVideo();
-          }
-        } catch(e) {}
-      }, 300);
-    }
-  }
-});
+// Native audio element — iOS keeps this alive in background
+var audio = document.getElementById('audio-player');
 
 // Default songs
 var defaultSongs = [
@@ -846,132 +741,121 @@ function saveSongs() { localStorage.setItem('vora_songs', JSON.stringify(songs))
 function saveLiked() { localStorage.setItem('vora_liked', JSON.stringify(liked)); }
 function isLiked(id) { return liked.includes(id); }
 
-// ── YouTube IFrame API ─────────────────────────────────────────────────────
-var tag = document.createElement('script');
-tag.src = 'https://www.youtube.com/iframe_api';
-document.head.appendChild(tag);
+// ── Piped API — extracts direct audio stream URL from YouTube ID ───────────
+// Piped is an open-source YouTube frontend that returns streamable audio URLs.
+// We try multiple public instances in case one is down.
+var PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://piped-api.garudalinux.org',
+  'https://api.piped.projectsegfau.lt'
+];
+var pipedIdx = 0;
+var currentLoadToken = 0; // prevents race conditions when switching songs fast
 
-// ── Ad Blocker ─────────────────────────────────────────────────────────────
-var adCheckInterval = null;
-var expectedVideoId = null;
-var adSkipAttempts = 0;
-
-function startAdWatcher() {
-  stopAdWatcher();
-  adSkipAttempts = 0;
-  adCheckInterval = setInterval(function() {
-    if (!ytReady || !ytPlayer) return;
-    try {
-      // Check if an ad is playing by looking at the current video URL
-      var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
-      if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
-        // A different video is playing — this is an ad!
-        handleAdDetected();
-        return;
-      }
-
-      // Try to click the skip button if it exists inside the iframe
-      var iframe = document.querySelector('#yt-player iframe') || document.getElementById('yt-player');
-      if (iframe && iframe.contentDocument) {
-        var skipBtn = iframe.contentDocument.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, [class*="skip"]');
-        if (skipBtn) { skipBtn.click(); return; }
-        // Mute ad audio as fallback
-        var adBadge = iframe.contentDocument.querySelector('.ytp-ad-badge, .ytp-ad-text');
-        if (adBadge) { ytPlayer.mute && ytPlayer.mute(); }
-        else { ytPlayer.unMute && ytPlayer.unMute(); }
-      }
-
-      // Fallback: detect ads via player state + duration anomaly
-      var dur = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
-      var cur = ytPlayer.getCurrentTime ? ytPlayer.getCurrentTime() : 0;
-      // Ads are typically under 30s and play at the start
-      if (dur > 0 && dur < 35 && cur < dur && adSkipAttempts < 8) {
-        adSkipAttempts++;
-        // If this is suspiciously short for a music video, mute and wait for it to finish
-        ytPlayer.mute && ytPlayer.mute();
-        // Force seek to end to skip short ad
-        if (adSkipAttempts >= 3) {
-          ytPlayer.seekTo(dur - 0.1);
-        }
-      } else if (dur >= 35) {
-        // Looks like a real video, unmute
-        adSkipAttempts = 0;
-        ytPlayer.unMute && ytPlayer.unMute();
-      }
-    } catch(err) { /* cross-origin restrictions, skip silently */ }
-  }, 700);
+function getAudioStream(ytId, callback) {
+  var token = ++currentLoadToken;
+  tryPipedInstance(ytId, 0, token, callback);
 }
 
-function stopAdWatcher() {
-  if (adCheckInterval) clearInterval(adCheckInterval);
-  adCheckInterval = null;
-}
-
-function handleAdDetected() {
-  // Mute while ad plays and keep checking until the real video loads
-  ytPlayer.mute && ytPlayer.mute();
-  showToast('⏭ A saltar anúncio...');
-}
-
-function onYouTubeIframeAPIReady() {
-  ytPlayer = new YT.Player('yt-player', {
-    height: '1', width: '1',
-    playerVars: {
-      autoplay: 0,
-      controls: 0,
-      playsinline: 1,
-      rel: 0,
-      disablekb: 1,
-      iv_load_policy: 3,  // disable annotations
-      modestbranding: 1,
-      // Use no-cookie domain to reduce tracking & some ad types
-      origin: window.location.origin
-    },
-    host: 'https://www.youtube-nocookie.com',
-    events: {
-      onReady: function() {
-        ytReady = true;
-      },
-      onStateChange: function(e) {
-        if (e.data === YT.PlayerState.PLAYING) {
-          // Check if the playing video matches expected
-          var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
-          if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
-            // Ad is playing — mute it
-            ytPlayer.mute && ytPlayer.mute();
-            showToast('⏭ A saltar anúncio...');
-          } else {
-            // Real video — unmute and update UI
-            ytPlayer.unMute && ytPlayer.unMute();
-            setPlayingUI(true);
-            startProgress();
-          }
+function tryPipedInstance(ytId, instIdx, token, callback) {
+  if (instIdx >= PIPED_INSTANCES.length) {
+    callback(null, 'Não foi possível carregar o áudio. Tenta noutra música.');
+    return;
+  }
+  var url = PIPED_INSTANCES[instIdx] + '/streams/' + ytId;
+  fetch(url)
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      if (token !== currentLoadToken) return; // stale request, song changed
+      // Find best audio-only stream
+      var streams = data.audioStreams || [];
+      // Sort by bitrate descending, prefer m4a/aac for iOS compatibility
+      streams.sort(function(a, b) { return (b.bitrate || 0) - (a.bitrate || 0); });
+      var best = null;
+      // First try m4a/mp4a (best iOS support)
+      for (var i = 0; i < streams.length; i++) {
+        var mime = (streams[i].mimeType || '').toLowerCase();
+        if (mime.indexOf('mp4') !== -1 || mime.indexOf('m4a') !== -1 || mime.indexOf('aac') !== -1) {
+          best = streams[i]; break;
         }
-        if (e.data === YT.PlayerState.PAUSED) { setPlayingUI(false); stopProgress(); }
-        if (e.data === YT.PlayerState.ENDED) {
-          // If ended but it's not our video, it was an ad — autoplay our song
-          var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
-          if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
-            // Ad ended, the real video should load now; do nothing (YT will auto-load it)
-          } else {
-            onSongEnd();
-          }
-        }
-        if (e.data === YT.PlayerState.BUFFERING) {
-          // Check for ad on buffering too
-          var videoData = ytPlayer.getVideoData ? ytPlayer.getVideoData() : null;
-          if (videoData && expectedVideoId && videoData.video_id !== expectedVideoId) {
-            ytPlayer.mute && ytPlayer.mute();
-          }
-        }
-      },
-      onError: function(e) {
-        // Video unavailable/blocked, skip to next
-        showToast('Vídeo indisponível, a saltar...');
-        setTimeout(nextSong, 1500);
       }
-    }
+      // Fallback to any stream
+      if (!best && streams.length) best = streams[0];
+      if (!best) throw new Error('No audio streams');
+      callback(best.url, null);
+    })
+    .catch(function(err) {
+      if (token !== currentLoadToken) return;
+      // Try next instance
+      tryPipedInstance(ytId, instIdx + 1, token, callback);
+    });
+}
+
+// ── Audio element event listeners ──────────────────────────────────────────
+audio.addEventListener('playing', function() {
+  setPlayingUI(true);
+  startProgress();
+});
+audio.addEventListener('pause', function() {
+  setPlayingUI(false);
+  stopProgress();
+});
+audio.addEventListener('ended', onSongEnd);
+audio.addEventListener('error', function() {
+  showToast('Erro a carregar áudio, a saltar...');
+  setTimeout(nextSong, 1500);
+});
+audio.addEventListener('waiting', function() {
+  showToast('A carregar...');
+});
+audio.addEventListener('canplay', function() {
+  // clear any loading toast
+});
+
+// ── Media Session API (Lock Screen + Control Centre on iOS) ────────────────
+function updateMediaSession(s) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: s.name,
+    artist: s.artist,
+    album: 'Vora',
+    artwork: s.cover ? [
+      { src: s.cover, sizes: '512x512', type: 'image/jpeg' },
+      { src: s.cover, sizes: '192x192', type: 'image/jpeg' }
+    ] : []
   });
+  navigator.mediaSession.setActionHandler('play', function() { audio.play(); });
+  navigator.mediaSession.setActionHandler('pause', function() { audio.pause(); });
+  navigator.mediaSession.setActionHandler('previoustrack', prevSong);
+  navigator.mediaSession.setActionHandler('nexttrack', nextSong);
+  navigator.mediaSession.setActionHandler('seekto', function(d) {
+    if (d.seekTime !== undefined) { audio.currentTime = d.seekTime; }
+  });
+  navigator.mediaSession.setActionHandler('seekbackward', function(d) {
+    audio.currentTime = Math.max(0, audio.currentTime - (d.seekOffset || 10));
+  });
+  navigator.mediaSession.setActionHandler('seekforward', function(d) {
+    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + (d.seekOffset || 10));
+  });
+}
+
+function setMediaSessionState(playing) {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+}
+
+function updateMediaSessionPosition() {
+  if (!('mediaSession' in navigator) || !audio.duration) return;
+  try {
+    navigator.mediaSession.setPositionState({
+      duration: audio.duration,
+      playbackRate: audio.playbackRate || 1,
+      position: Math.min(audio.currentTime, audio.duration)
+    });
+  } catch(e) {}
 }
 
 // ── Playback ───────────────────────────────────────────────────────────────
@@ -979,25 +863,41 @@ function playSong(idx) {
   if (idx < 0 || idx >= songs.length) return;
   currentIdx = idx;
   var s = songs[idx];
-  expectedVideoId = s.ytId;
   updatePlayerUI(s);
   updateMediaSession(s);
-  resumeAudioContext();
-  if (ytReady) {
-    ytPlayer.loadVideoById(s.ytId);
-    ytPlayer.playVideo();
-    startAdWatcher();
-  }
   document.getElementById('mini-player').classList.add('visible');
   setAmbient(s.cover);
+
+  // Show loading state
+  showToast('A carregar "' + s.name + '"...');
+  audio.src = '';
+  audio.load();
+
+  getAudioStream(s.ytId, function(streamUrl, err) {
+    if (err) { showToast(err); return; }
+    if (currentIdx !== idx) return; // user already switched song
+    audio.src = streamUrl;
+    audio.load();
+    var playPromise = audio.play();
+    if (playPromise) {
+      playPromise.catch(function(e) {
+        // Autoplay blocked — user needs to tap play
+        showToast('Toca em ▶️ para começar');
+        setPlayingUI(false);
+      });
+    }
+  });
+
   renderAll();
 }
 
 function togglePlay() {
   if (currentIdx < 0 && songs.length) { playSong(0); return; }
-  if (!ytReady) return;
-  if (isPlaying) ytPlayer.pauseVideo();
-  else ytPlayer.playVideo();
+  if (isPlaying) audio.pause();
+  else {
+    var p = audio.play();
+    if (p) p.catch(function(){ showToast('Toca no ecrã para activar o áudio'); });
+  }
 }
 
 function nextSong() {
@@ -1010,25 +910,22 @@ function nextSong() {
 
 function prevSong() {
   if (!songs.length) return;
-  if (ytReady && ytPlayer.getCurrentTime && ytPlayer.getCurrentTime() > 3) {
-    ytPlayer.seekTo(0); return;
-  }
+  if (audio.currentTime > 3) { audio.currentTime = 0; return; }
   var prev = (currentIdx - 1 + songs.length) % songs.length;
   playSong(prev);
 }
 
 function onSongEnd() {
-  if (isRepeat) { ytPlayer.seekTo(0); ytPlayer.playVideo(); }
+  if (isRepeat) { audio.currentTime = 0; audio.play(); }
   else nextSong();
 }
 
 function seekTo(e) {
-  if (!ytReady || currentIdx < 0) return;
+  if (currentIdx < 0 || !audio.duration) return;
   var bar = document.getElementById('progress-bar');
   var rect = bar.getBoundingClientRect();
   var ratio = (e.clientX - rect.left) / rect.width;
-  var dur = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
-  if (dur) ytPlayer.seekTo(ratio * dur);
+  audio.currentTime = ratio * audio.duration;
 }
 
 function setPlayingUI(playing) {
@@ -1050,9 +947,8 @@ function stopProgress() {
 }
 
 function updateProgress() {
-  if (!ytReady || !ytPlayer.getCurrentTime) return;
-  var cur = ytPlayer.getCurrentTime();
-  var dur = ytPlayer.getDuration ? ytPlayer.getDuration() : 0;
+  var cur = audio.currentTime || 0;
+  var dur = audio.duration || 0;
   if (!dur) return;
   var pct = (cur / dur) * 100;
   document.getElementById('progress-fill').style.width = pct + '%';
@@ -1073,14 +969,11 @@ function updatePlayerUI(s) {
   document.getElementById('fp-title').textContent = s.name;
   document.getElementById('fp-artist').textContent = s.artist;
   document.getElementById('fp-like-btn').textContent = isLiked(s.id) ? '❤️' : '🤍';
-
   var cover = s.cover || '';
-  // mini thumb
   var mt = document.getElementById('mini-thumb');
-  mt.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML=\'🎵\'"/>' : '🎵';
-  // fp art
+  mt.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
   var fa = document.getElementById('fp-art');
-  fa.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML=\'🎵\'"/>' : '🎵';
+  fa.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
 }
 
 // ── Ambient ────────────────────────────────────────────────────────────────
@@ -1121,12 +1014,8 @@ function addSong() {
   var artist = document.getElementById('inp-artist').value.trim();
   var ytId = document.getElementById('inp-yt').value.trim();
   var cover = document.getElementById('inp-cover').value.trim();
-
   if (!name || !artist || !ytId) { showToast('Preenche nome, artista e ID do YouTube'); return; }
-
-  // Auto cover from YouTube thumbnail if none provided
   if (!cover) cover = 'https://i.ytimg.com/vi/' + ytId + '/hqdefault.jpg';
-
   var s = { id: 's' + Date.now(), name: name, artist: artist, ytId: ytId, cover: cover };
   songs.unshift(s);
   saveSongs();
@@ -1134,7 +1023,7 @@ function addSong() {
   document.getElementById('inp-artist').value = '';
   document.getElementById('inp-yt').value = '';
   document.getElementById('inp-cover').value = '';
-  showToast('\"' + name + '\" adicionada!');
+  showToast('"' + name + '" adicionada!');
   renderAll();
   showPage('page-home');
 }
@@ -1152,6 +1041,8 @@ function clearLibrary() {
   songs = [];
   saveSongs();
   currentIdx = -1;
+  audio.pause();
+  audio.src = '';
   document.getElementById('mini-player').classList.remove('visible');
   renderAll();
 }
@@ -1177,10 +1068,10 @@ function renderFeatured() {
   var row = document.getElementById('featured-row');
   var top = songs.slice(0, 6);
   if (!top.length) { row.innerHTML = ''; return; }
-  row.innerHTML = top.map(function(s, i) {
+  row.innerHTML = top.map(function(s) {
     var cover = s.cover || '';
     var thumbHtml = cover
-      ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML=\'🎵\'" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>'
+      ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>'
       : '🎵';
     return '<div class="album-card" onclick="playSong(' + songs.indexOf(s) + ')">' +
       '<div class="album-thumb">' + thumbHtml +
@@ -1209,20 +1100,15 @@ function renderLibrary() {
 
 function songRowHTML(s, i, showDel) {
   var cover = s.cover || '';
-  var thumbHtml = cover
-    ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML=\'🎵\'"/>'
-    : '🎵';
+  var thumbHtml = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
   var isNowPlaying = (i === currentIdx);
-  var likeIcon = isLiked(s.id) ? '❤️' : '🤍';
   var playingBars = isNowPlaying && isPlaying
-    ? '<div class="playing-bars"><span></span><span></span><span></span></div>'
-    : '';
-
+    ? '<div class="playing-bars"><span></span><span></span><span></span></div>' : '';
   return '<div class="song-row' + (isNowPlaying ? ' playing' : '') + '" onclick="playSong(' + i + ')">' +
     '<div class="song-thumb">' + thumbHtml + '</div>' +
     '<div class="song-info"><h3>' + esc(s.name) + '</h3><p>' + esc(s.artist) + '</p></div>' +
     '<div class="song-actions">' + playingBars +
-    (showDel ? '<button class="icon-btn" onclick="event.stopPropagation();removeSong(\'' + s.id + '\')" style="color:var(--red)">✕</button>' : '') +
+    (showDel ? '<button class="icon-btn" onclick="event.stopPropagation();removeSong('' + s.id + '')" style="color:var(--red)">✕</button>' : '') +
     '</div></div>';
 }
 
@@ -1239,12 +1125,8 @@ function showPage(id) {
   if (map[id]) document.getElementById(map[id]).classList.add('active');
 }
 
-function openFullPlayer() {
-  document.getElementById('full-player').classList.add('open');
-}
-function closeFullPlayer() {
-  document.getElementById('full-player').classList.remove('open');
-}
+function openFullPlayer() { document.getElementById('full-player').classList.add('open'); }
+function closeFullPlayer() { document.getElementById('full-player').classList.remove('open'); }
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 var toastTimer = null;
