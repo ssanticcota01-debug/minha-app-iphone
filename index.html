@@ -1401,11 +1401,12 @@
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────────
-    document.getElementById('shuffle-btn').style.opacity = '0.4';
-    document.getElementById('repeat-btn').style.opacity = '0.4';
-    renderAll();
-
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+    window.addEventListener('load', function() {
+      document.getElementById('shuffle-btn').style.opacity = '0.4';
+      document.getElementById('repeat-btn').style.opacity = '0.4';
+      renderAll();
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+    });
 
   </script>
 </body>
