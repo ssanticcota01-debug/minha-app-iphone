@@ -1056,7 +1056,7 @@
     function isLiked(id) { return liked.indexOf(id) !== -1; }
 
     // ── Version / localStorage reset ────────────────────────────────────────────
-    var APP_VERSION = 'vora_v5';
+    var APP_VERSION = 'vora_v6';
     if (localStorage.getItem('vora_version') !== APP_VERSION) {
       localStorage.removeItem('vora_songs');
       localStorage.removeItem('vora_liked');
@@ -1242,8 +1242,9 @@
       document.getElementById('fp-artist').textContent = s.artist;
       document.getElementById('fp-like-btn').textContent = isLiked(s.id) ? '❤️' : '🤍';
       var cover = s.cover || '';
-      document.getElementById('mini-thumb').innerHTML = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
-      document.getElementById('fp-art').innerHTML = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
+      var fallback = 'this.parentNode.innerHTML=String.fromCharCode(127925)';
+      document.getElementById('mini-thumb').innerHTML = cover ? '<img src="' + cover + '" onerror="' + fallback + '"/>' : '🎵';
+      document.getElementById('fp-art').innerHTML = cover ? '<img src="' + cover + '" onerror="' + fallback + '"/>' : '🎵';
     }
 
     // ── Ambient ───────────────────────────────────────────────────────────────────
