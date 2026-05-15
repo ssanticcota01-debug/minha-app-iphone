@@ -715,8 +715,12 @@ body {
 <div class="toast" id="toast"></div>
 
 <script>
-// ── State ──────────────────────────────────────────────────────────────────
-// Version bump forces a clean slate when switching from YT iframe to native audio
+// ── Helper functions first (hoisting-safe order) ────────────────────────────
+function saveSongs() { localStorage.setItem('vora_songs', JSON.stringify(songs)); }
+function saveLiked() { localStorage.setItem('vora_liked', JSON.stringify(liked)); }
+function isLiked(id) { return liked.indexOf(id) !== -1; }
+
+// ── Version / localStorage reset ────────────────────────────────────────────
 var APP_VERSION = 'vora_v2';
 if (localStorage.getItem('vora_version') !== APP_VERSION) {
   localStorage.removeItem('vora_songs');
@@ -724,18 +728,7 @@ if (localStorage.getItem('vora_version') !== APP_VERSION) {
   localStorage.setItem('vora_version', APP_VERSION);
 }
 
-var songs = JSON.parse(localStorage.getItem('vora_songs') || '[]');
-var liked = JSON.parse(localStorage.getItem('vora_liked') || '[]');
-var currentIdx = -1;
-var isPlaying = false;
-var isShuffle = false;
-var isRepeat = false;
-var progressInterval = null;
-
-// Native audio element — iOS keeps this alive in background
-var audio = document.getElementById('audio-player');
-
-// Default songs
+// ── State ────────────────────────────────────────────────────────────────────
 var defaultSongs = [
   { id: 's1', name: 'Blinding Lights', artist: 'The Weeknd', ytId: '4NRXx6U8ABQ', cover: 'https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg' },
   { id: 's2', name: 'Levitating', artist: 'Dua Lipa', ytId: 'TUVcZfQe-Kw', cover: 'https://i.ytimg.com/vi/TUVcZfQe-Kw/hqdefault.jpg' },
@@ -743,28 +736,26 @@ var defaultSongs = [
   { id: 's4', name: 'Heat Waves', artist: 'Glass Animals', ytId: 'mRD0-GxqHVo', cover: 'https://i.ytimg.com/vi/mRD0-GxqHVo/hqdefault.jpg' },
   { id: 's5', name: 'As It Was', artist: 'Harry Styles', ytId: 'H5v3kku4y6Q', cover: 'https://i.ytimg.com/vi/H5v3kku4y6Q/hqdefault.jpg' },
 ];
-if (!songs.length) {
-  songs = defaultSongs;
-  saveSongs();
-  // Also clear any stale liked list from old version
-  localStorage.removeItem('vora_liked');
-  liked = [];
-}
 
-function saveSongs() { localStorage.setItem('vora_songs', JSON.stringify(songs)); }
-function saveLiked() { localStorage.setItem('vora_liked', JSON.stringify(liked)); }
-function isLiked(id) { return liked.includes(id); }
+var songs = JSON.parse(localStorage.getItem('vora_songs') || 'null') || defaultSongs.slice();
+var liked = JSON.parse(localStorage.getItem('vora_liked') || '[]');
+if (!songs.length) { songs = defaultSongs.slice(); }
+saveSongs();
 
-// ── Piped API — extracts direct audio stream URL from YouTube ID ───────────
-// Piped is an open-source YouTube frontend that returns streamable audio URLs.
-// We try multiple public instances in case one is down.
+var currentIdx = -1;
+var isPlaying = false;
+var isShuffle = false;
+var isRepeat = false;
+var progressInterval = null;
+var audio = document.getElementById('audio-player');
+
+// ── Piped API ────────────────────────────────────────────────────────────────
 var PIPED_INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://piped-api.garudalinux.org',
   'https://api.piped.projectsegfau.lt'
 ];
-var pipedIdx = 0;
-var currentLoadToken = 0; // prevents race conditions when switching songs fast
+var currentLoadToken = 0;
 
 function getAudioStream(ytId, callback) {
   var token = ++currentLoadToken;
@@ -773,106 +764,59 @@ function getAudioStream(ytId, callback) {
 
 function tryPipedInstance(ytId, instIdx, token, callback) {
   if (instIdx >= PIPED_INSTANCES.length) {
-    callback(null, 'Não foi possível carregar o áudio. Tenta noutra música.');
+    callback(null, 'Não foi possível carregar. Tenta noutra música.');
     return;
   }
-  var url = PIPED_INSTANCES[instIdx] + '/streams/' + ytId;
-  fetch(url)
-    .then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
+  fetch(PIPED_INSTANCES[instIdx] + '/streams/' + ytId)
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(data) {
-      if (token !== currentLoadToken) return; // stale request, song changed
-      // Find best audio-only stream
-      var streams = data.audioStreams || [];
-      // Sort by bitrate descending, prefer m4a/aac for iOS compatibility
-      streams.sort(function(a, b) { return (b.bitrate || 0) - (a.bitrate || 0); });
+      if (token !== currentLoadToken) return;
+      var streams = (data.audioStreams || []).slice().sort(function(a,b){ return (b.bitrate||0)-(a.bitrate||0); });
       var best = null;
-      // First try m4a/mp4a (best iOS support)
       for (var i = 0; i < streams.length; i++) {
-        var mime = (streams[i].mimeType || '').toLowerCase();
-        if (mime.indexOf('mp4') !== -1 || mime.indexOf('m4a') !== -1 || mime.indexOf('aac') !== -1) {
-          best = streams[i]; break;
-        }
+        var m = (streams[i].mimeType || '').toLowerCase();
+        if (m.indexOf('mp4') !== -1 || m.indexOf('m4a') !== -1 || m.indexOf('aac') !== -1) { best = streams[i]; break; }
       }
-      // Fallback to any stream
       if (!best && streams.length) best = streams[0];
-      if (!best) throw new Error('No audio streams');
+      if (!best) throw new Error('No streams');
       callback(best.url, null);
     })
-    .catch(function(err) {
+    .catch(function() {
       if (token !== currentLoadToken) return;
-      // Try next instance
       tryPipedInstance(ytId, instIdx + 1, token, callback);
     });
 }
 
-// ── Audio element event listeners ──────────────────────────────────────────
-audio.addEventListener('playing', function() {
-  setPlayingUI(true);
-  startProgress();
-});
-audio.addEventListener('pause', function() {
-  setPlayingUI(false);
-  stopProgress();
-});
-audio.addEventListener('ended', onSongEnd);
-audio.addEventListener('error', function() {
-  showToast('Erro a carregar áudio, a saltar...');
-  setTimeout(nextSong, 1500);
-});
-audio.addEventListener('waiting', function() {
-  showToast('A carregar...');
-});
-audio.addEventListener('canplay', function() {
-  // clear any loading toast
-});
+// ── Audio events ─────────────────────────────────────────────────────────────
+audio.addEventListener('playing', function() { setPlayingUI(true); startProgress(); });
+audio.addEventListener('pause',   function() { setPlayingUI(false); stopProgress(); });
+audio.addEventListener('ended',   onSongEnd);
+audio.addEventListener('error',   function() { showToast('Erro no áudio, a saltar...'); setTimeout(nextSong, 1500); });
 
-// ── Media Session API (Lock Screen + Control Centre on iOS) ────────────────
+// ── Media Session ─────────────────────────────────────────────────────────────
 function updateMediaSession(s) {
   if (!('mediaSession' in navigator)) return;
   navigator.mediaSession.metadata = new MediaMetadata({
-    title: s.name,
-    artist: s.artist,
-    album: 'Vora',
-    artwork: s.cover ? [
-      { src: s.cover, sizes: '512x512', type: 'image/jpeg' },
-      { src: s.cover, sizes: '192x192', type: 'image/jpeg' }
-    ] : []
+    title: s.name, artist: s.artist, album: 'Vora',
+    artwork: s.cover ? [{ src: s.cover, sizes: '512x512', type: 'image/jpeg' }] : []
   });
-  navigator.mediaSession.setActionHandler('play', function() { audio.play(); });
-  navigator.mediaSession.setActionHandler('pause', function() { audio.pause(); });
+  navigator.mediaSession.setActionHandler('play',          function() { audio.play(); });
+  navigator.mediaSession.setActionHandler('pause',         function() { audio.pause(); });
   navigator.mediaSession.setActionHandler('previoustrack', prevSong);
-  navigator.mediaSession.setActionHandler('nexttrack', nextSong);
-  navigator.mediaSession.setActionHandler('seekto', function(d) {
-    if (d.seekTime !== undefined) { audio.currentTime = d.seekTime; }
-  });
-  navigator.mediaSession.setActionHandler('seekbackward', function(d) {
-    audio.currentTime = Math.max(0, audio.currentTime - (d.seekOffset || 10));
-  });
-  navigator.mediaSession.setActionHandler('seekforward', function(d) {
-    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + (d.seekOffset || 10));
-  });
+  navigator.mediaSession.setActionHandler('nexttrack',     nextSong);
+  navigator.mediaSession.setActionHandler('seekto',        function(d) { if (d.seekTime != null) audio.currentTime = d.seekTime; });
+  navigator.mediaSession.setActionHandler('seekbackward',  function(d) { audio.currentTime = Math.max(0, audio.currentTime - (d.seekOffset||10)); });
+  navigator.mediaSession.setActionHandler('seekforward',   function(d) { audio.currentTime = Math.min(audio.duration||0, audio.currentTime + (d.seekOffset||10)); });
 }
-
-function setMediaSessionState(playing) {
-  if (!('mediaSession' in navigator)) return;
-  navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+function setMediaSessionState(p) {
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = p ? 'playing' : 'paused';
 }
-
 function updateMediaSessionPosition() {
   if (!('mediaSession' in navigator) || !audio.duration) return;
-  try {
-    navigator.mediaSession.setPositionState({
-      duration: audio.duration,
-      playbackRate: audio.playbackRate || 1,
-      position: Math.min(audio.currentTime, audio.duration)
-    });
-  } catch(e) {}
+  try { navigator.mediaSession.setPositionState({ duration: audio.duration, playbackRate: 1, position: Math.min(audio.currentTime, audio.duration) }); } catch(e) {}
 }
 
-// ── Playback ───────────────────────────────────────────────────────────────
+// ── Playback ──────────────────────────────────────────────────────────────────
 function playSong(idx) {
   if (idx < 0 || idx >= songs.length) return;
   currentIdx = idx;
@@ -881,52 +825,35 @@ function playSong(idx) {
   updateMediaSession(s);
   document.getElementById('mini-player').classList.add('visible');
   setAmbient(s.cover);
-
-  // Show loading state
   showToast('A carregar "' + s.name + '"...');
+  audio.pause();
   audio.src = '';
-  audio.load();
-
-  getAudioStream(s.ytId, function(streamUrl, err) {
+  getAudioStream(s.ytId, function(url, err) {
     if (err) { showToast(err); return; }
-    if (currentIdx !== idx) return; // user already switched song
-    audio.src = streamUrl;
+    if (currentIdx !== idx) return;
+    audio.src = url;
     audio.load();
-    var playPromise = audio.play();
-    if (playPromise) {
-      playPromise.catch(function(e) {
-        // Autoplay blocked — user needs to tap play
-        showToast('Toca em ▶️ para começar');
-        setPlayingUI(false);
-      });
-    }
+    audio.play().catch(function() { showToast('Toca em ▶️ para começar'); setPlayingUI(false); });
   });
-
   renderAll();
 }
 
 function togglePlay() {
   if (currentIdx < 0 && songs.length) { playSong(0); return; }
   if (isPlaying) audio.pause();
-  else {
-    var p = audio.play();
-    if (p) p.catch(function(){ showToast('Toca no ecrã para activar o áudio'); });
-  }
+  else audio.play().catch(function(){});
 }
 
 function nextSong() {
   if (!songs.length) return;
-  var next;
-  if (isShuffle) next = Math.floor(Math.random() * songs.length);
-  else next = (currentIdx + 1) % songs.length;
+  var next = isShuffle ? Math.floor(Math.random() * songs.length) : (currentIdx + 1) % songs.length;
   playSong(next);
 }
 
 function prevSong() {
   if (!songs.length) return;
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
-  var prev = (currentIdx - 1 + songs.length) % songs.length;
-  playSong(prev);
+  playSong((currentIdx - 1 + songs.length) % songs.length);
 }
 
 function onSongEnd() {
@@ -938,14 +865,13 @@ function seekTo(e) {
   if (currentIdx < 0 || !audio.duration) return;
   var bar = document.getElementById('progress-bar');
   var rect = bar.getBoundingClientRect();
-  var ratio = (e.clientX - rect.left) / rect.width;
-  audio.currentTime = ratio * audio.duration;
+  audio.currentTime = ((e.clientX - rect.left) / rect.width) * audio.duration;
 }
 
 function setPlayingUI(playing) {
   isPlaying = playing;
   document.getElementById('mini-play-btn').textContent = playing ? '⏸️' : '▶️';
-  document.getElementById('fp-play-btn').textContent = playing ? '⏸' : '▶';
+  document.getElementById('fp-play-btn').textContent   = playing ? '⏸'  : '▶';
   var art = document.getElementById('fp-art');
   if (playing) art.classList.add('playing'); else art.classList.remove('playing');
   setMediaSessionState(playing);
@@ -955,18 +881,14 @@ function startProgress() {
   stopProgress();
   progressInterval = setInterval(updateProgress, 1000);
 }
-
-function stopProgress() {
-  if (progressInterval) clearInterval(progressInterval);
-}
+function stopProgress() { if (progressInterval) clearInterval(progressInterval); }
 
 function updateProgress() {
-  var cur = audio.currentTime || 0;
-  var dur = audio.duration || 0;
+  var cur = audio.currentTime || 0, dur = audio.duration || 0;
   if (!dur) return;
   var pct = (cur / dur) * 100;
   document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('mini-prog').style.width = pct + '%';
+  document.getElementById('mini-prog').style.width     = pct + '%';
   document.getElementById('time-cur').textContent = fmtTime(cur);
   document.getElementById('time-dur').textContent = fmtTime(dur);
   updateMediaSessionPosition();
@@ -974,32 +896,30 @@ function updateProgress() {
 
 function fmtTime(s) {
   s = Math.floor(s);
-  return Math.floor(s/60) + ':' + ('0' + (s%60)).slice(-2);
+  return Math.floor(s/60) + ':' + ('0'+(s%60)).slice(-2);
 }
 
 function updatePlayerUI(s) {
-  document.getElementById('mini-title').textContent = s.name;
+  document.getElementById('mini-title').textContent  = s.name;
   document.getElementById('mini-artist').textContent = s.artist;
-  document.getElementById('fp-title').textContent = s.name;
-  document.getElementById('fp-artist').textContent = s.artist;
+  document.getElementById('fp-title').textContent    = s.name;
+  document.getElementById('fp-artist').textContent   = s.artist;
   document.getElementById('fp-like-btn').textContent = isLiked(s.id) ? '❤️' : '🤍';
   var cover = s.cover || '';
-  var mt = document.getElementById('mini-thumb');
-  mt.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
-  var fa = document.getElementById('fp-art');
-  fa.innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
+  document.getElementById('mini-thumb').innerHTML = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
+  document.getElementById('fp-art').innerHTML     = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
 }
 
-// ── Ambient ────────────────────────────────────────────────────────────────
+// ── Ambient ───────────────────────────────────────────────────────────────────
 function setAmbient(cover) {
   var colors = ['#4c1d95','#1e3a5f','#1a1a2e','#2d1b4e','#0f2027'];
   var c = colors[Math.floor(Math.random() * colors.length)];
   document.getElementById('ambient').style.background =
-    'radial-gradient(ellipse 70% 50% at 30% 20%, ' + c + '55 0%, transparent 70%),' +
+    'radial-gradient(ellipse 70% 50% at 30% 20%, '+c+'55 0%, transparent 70%),' +
     'radial-gradient(ellipse 50% 40% at 80% 80%, rgba(129,140,248,0.08) 0%, transparent 60%)';
 }
 
-// ── Shuffle / Repeat ───────────────────────────────────────────────────────
+// ── Shuffle / Repeat ──────────────────────────────────────────────────────────
 function toggleShuffle() {
   isShuffle = !isShuffle;
   document.getElementById('shuffle-btn').style.opacity = isShuffle ? '1' : '0.4';
@@ -1011,7 +931,7 @@ function toggleRepeat() {
   showToast(isRepeat ? 'Repetir ativado' : 'Repetir desativado');
 }
 
-// ── Like ───────────────────────────────────────────────────────────────────
+// ── Like ──────────────────────────────────────────────────────────────────────
 function toggleLike() {
   if (currentIdx < 0) return;
   var id = songs[currentIdx].id;
@@ -1022,21 +942,20 @@ function toggleLike() {
   renderAll();
 }
 
-// ── Add / Remove ───────────────────────────────────────────────────────────
+// ── Add / Remove ──────────────────────────────────────────────────────────────
 function addSong() {
-  var name = document.getElementById('inp-name').value.trim();
+  var name   = document.getElementById('inp-name').value.trim();
   var artist = document.getElementById('inp-artist').value.trim();
-  var ytId = document.getElementById('inp-yt').value.trim();
-  var cover = document.getElementById('inp-cover').value.trim();
+  var ytId   = document.getElementById('inp-yt').value.trim();
+  var cover  = document.getElementById('inp-cover').value.trim();
   if (!name || !artist || !ytId) { showToast('Preenche nome, artista e ID do YouTube'); return; }
   if (!cover) cover = 'https://i.ytimg.com/vi/' + ytId + '/hqdefault.jpg';
-  var s = { id: 's' + Date.now(), name: name, artist: artist, ytId: ytId, cover: cover };
-  songs.unshift(s);
+  songs.unshift({ id: 's'+Date.now(), name: name, artist: artist, ytId: ytId, cover: cover });
   saveSongs();
-  document.getElementById('inp-name').value = '';
+  document.getElementById('inp-name').value   = '';
   document.getElementById('inp-artist').value = '';
-  document.getElementById('inp-yt').value = '';
-  document.getElementById('inp-cover').value = '';
+  document.getElementById('inp-yt').value     = '';
+  document.getElementById('inp-cover').value  = '';
   showToast('"' + name + '" adicionada!');
   renderAll();
   showPage('page-home');
@@ -1055,22 +974,18 @@ function clearLibrary() {
   songs = [];
   saveSongs();
   currentIdx = -1;
-  audio.pause();
-  audio.src = '';
+  audio.pause(); audio.src = '';
   document.getElementById('mini-player').classList.remove('visible');
   renderAll();
 }
 
-// ── Download ───────────────────────────────────────────────────────────────
+// ── Download ──────────────────────────────────────────────────────────────────
 function showDownload() {
   if (currentIdx < 0) return;
-  var s = songs[currentIdx];
-  var url = 'https://www.y2mate.com/youtube/' + s.ytId;
-  showToast('A abrir download de áudio...');
-  setTimeout(function(){ window.open(url, '_blank'); }, 500);
+  window.open('https://www.y2mate.com/youtube/' + songs[currentIdx].ytId, '_blank');
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────
+// ── Render ────────────────────────────────────────────────────────────────────
 function renderAll() {
   renderFeatured();
   renderHomeSongs();
@@ -1084,13 +999,10 @@ function renderFeatured() {
   if (!top.length) { row.innerHTML = ''; return; }
   row.innerHTML = top.map(function(s) {
     var cover = s.cover || '';
-    var thumbHtml = cover
-      ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>'
-      : '🎵';
-    return '<div class="album-card" onclick="playSong(' + songs.indexOf(s) + ')">' +
-      '<div class="album-thumb">' + thumbHtml +
-      '<div class="play-overlay"><span style="font-size:32px">▶</span></div></div>' +
-      '<h3>' + esc(s.name) + '</h3><p>' + esc(s.artist) + '</p></div>';
+    var th = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>' : '🎵';
+    return '<div class="album-card" onclick="playSong('+songs.indexOf(s)+')">'+
+      '<div class="album-thumb">'+th+'<div class="play-overlay"><span style="font-size:32px">▶</span></div></div>'+
+      '<h3>'+esc(s.name)+'</h3><p>'+esc(s.artist)+'</p></div>';
   }).join('');
 }
 
@@ -1100,7 +1012,7 @@ function renderHomeSongs() {
     el.innerHTML = '<div class="empty-state"><div class="e-icon">🎵</div><p>Ainda sem músicas.<br>Adiciona uma no ➕</p></div>';
     return;
   }
-  el.innerHTML = songs.map(function(s, i) { return songRowHTML(s, i); }).join('');
+  el.innerHTML = songs.map(function(s,i){ return songRowHTML(s,i); }).join('');
 }
 
 function renderLibrary() {
@@ -1109,20 +1021,19 @@ function renderLibrary() {
     el.innerHTML = '<div class="empty-state"><div class="e-icon">🎵</div><p>Biblioteca vazia</p></div>';
     return;
   }
-  el.innerHTML = songs.map(function(s, i) { return songRowHTML(s, i, true); }).join('');
+  el.innerHTML = songs.map(function(s,i){ return songRowHTML(s,i,true); }).join('');
 }
 
 function songRowHTML(s, i, showDel) {
   var cover = s.cover || '';
-  var thumbHtml = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
-  var isNowPlaying = (i === currentIdx);
-  var playingBars = isNowPlaying && isPlaying
-    ? '<div class="playing-bars"><span></span><span></span><span></span></div>' : '';
-  return '<div class="song-row' + (isNowPlaying ? ' playing' : '') + '" onclick="playSong(' + i + ')">' +
-    '<div class="song-thumb">' + thumbHtml + '</div>' +
-    '<div class="song-info"><h3>' + esc(s.name) + '</h3><p>' + esc(s.artist) + '</p></div>' +
-    '<div class="song-actions">' + playingBars +
-    (showDel ? '<button class="icon-btn" onclick="event.stopPropagation();removeSong('' + s.id + '')" style="color:var(--red)">✕</button>' : '') +
+  var th = cover ? '<img src="'+cover+'" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
+  var nowPlaying = (i === currentIdx);
+  var bars = nowPlaying && isPlaying ? '<div class="playing-bars"><span></span><span></span><span></span></div>' : '';
+  return '<div class="song-row'+(nowPlaying?' playing':'')+'" onclick="playSong('+i+')">'+
+    '<div class="song-thumb">'+th+'</div>'+
+    '<div class="song-info"><h3>'+esc(s.name)+'</h3><p>'+esc(s.artist)+'</p></div>'+
+    '<div class="song-actions">'+bars+
+    (showDel?'<button class="icon-btn" onclick="event.stopPropagation();removeSong(''+s.id+'')" style="color:var(--red)">✕</button>':'')+
     '</div></div>';
 }
 
@@ -1130,19 +1041,19 @@ function esc(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Navigation ─────────────────────────────────────────────────────────────
+// ── Navigation ────────────────────────────────────────────────────────────────
 function showPage(id) {
   document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(function(b){ b.classList.remove('active'); });
-  var map = { 'page-home': 'nav-home', 'page-search': 'nav-search', 'page-library': 'nav-library' };
+  var map = {'page-home':'nav-home','page-search':'nav-search','page-library':'nav-library'};
   if (map[id]) document.getElementById(map[id]).classList.add('active');
 }
 
-function openFullPlayer() { document.getElementById('full-player').classList.add('open'); }
+function openFullPlayer()  { document.getElementById('full-player').classList.add('open'); }
 function closeFullPlayer() { document.getElementById('full-player').classList.remove('open'); }
 
-// ── Toast ──────────────────────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────────────────────
 var toastTimer = null;
 function showToast(msg) {
   var t = document.getElementById('toast');
@@ -1152,12 +1063,13 @@ function showToast(msg) {
   toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2400);
 }
 
-// ── Init ───────────────────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('shuffle-btn').style.opacity = '0.4';
-document.getElementById('repeat-btn').style.opacity = '0.4';
+document.getElementById('repeat-btn').style.opacity  = '0.4';
 renderAll();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
 </script>
 </body>
 </html>
