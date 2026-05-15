@@ -1056,7 +1056,7 @@
     function isLiked(id) { return liked.indexOf(id) !== -1; }
 
     // ── Version / localStorage reset ────────────────────────────────────────────
-    var APP_VERSION = 'vora_v4';
+    var APP_VERSION = 'vora_v5';
     if (localStorage.getItem('vora_version') !== APP_VERSION) {
       localStorage.removeItem('vora_songs');
       localStorage.removeItem('vora_liked');
@@ -1335,7 +1335,7 @@
       if (!top.length) { row.innerHTML = ''; return; }
       row.innerHTML = top.map(function (s) {
         var cover = s.cover || '';
-        var th = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>' : '🎵';
+        var th = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML=String.fromCharCode(127925)" style="width:100%;height:100%;object-fit:cover;border-radius:14px"/>' : '🎵';
         return '<div class="album-card" onclick="playSong(' + songs.indexOf(s) + ')">' +
           '<div class="album-thumb">' + th + '<div class="play-overlay"><span style="font-size:32px">▶</span></div></div>' +
           '<h3>' + esc(s.name) + '</h3><p>' + esc(s.artist) + '</p></div>';
@@ -1362,15 +1362,15 @@
 
     function songRowHTML(s, i, showDel) {
       var cover = s.cover || '';
-      var th = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML='🎵'"/>' : '🎵';
+      var th = cover ? '<img src="' + cover + '" onerror="this.parentNode.innerHTML=String.fromCharCode(127925)"/>' : '🎵';
       var nowPlaying = (i === currentIdx);
       var bars = nowPlaying && isPlaying ? '<div class="playing-bars"><span></span><span></span><span></span></div>' : '';
+      var delBtn = showDel ? '<button class="icon-btn" onclick="event.stopPropagation();removeSong(\'' + s.id + '\')" style="color:var(--red)">✕</button>' : '';
       return '<div class="song-row' + (nowPlaying ? ' playing' : '') + '" onclick="playSong(' + i + ')">' +
         '<div class="song-thumb">' + th + '</div>' +
         '<div class="song-info"><h3>' + esc(s.name) + '</h3><p>' + esc(s.artist) + '</p></div>' +
-        '<div class="song-actions">' + bars +
-        (showDel ? '<button class="icon-btn" onclick="event.stopPropagation();removeSong(''+s.id+'')" style="color:var(--red)">✕</button>': '') +
-          '</div></div>';
+        '<div class="song-actions">' + bars + delBtn +
+        '</div></div>';
     }
 
     function esc(str) {
